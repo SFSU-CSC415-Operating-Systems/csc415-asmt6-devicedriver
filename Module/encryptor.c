@@ -21,6 +21,7 @@
 #define MY_MAJOR 415
 #define MY_MINOR 0
 #define DEVICE_NAME "encryptor"
+#define BUFFER_SIZE 512
 
 char *kernel_buffer;
 
@@ -31,57 +32,87 @@ MODULE_DESCRIPTION("A simple encryption/decryption program");
 MODULE_LICENSE("GPL");
 
 // data structure used for keeping count of how may times data is written
-struct myds {
-    int count;
-} myds;
+typedef struct encds {
+    int key;
+} encds;
+
+// another data structure
+struct file_operations fops = {
+    .open = myOpen,
+    .release = myClose,
+    .write = encrypt,
+    .read = decrypt,
+    .unlocked_ioctl = myIoCtl,
+    .owner = THIS_MODULE,
+}
 
 // this write function increments the data structure's count every time it is called.
 // NOTE - data is not physically written anywhere.
 // returns how many bytes were passed in.
 // 0 is in, 1 is out, 2 is error, 3 is the first file handle
-static ssize_t myWrite (struct file * fs, const char __user * buf, size_t hsize, loff_t * off) {
-    struct myds * ds;
-    ds = (struct myds *) fs->private_data;
-    ds->count = ds->count + 1;
-    printk(KERN_INFO "We wrote : %lu on write number %d\n", hsize, ds->count);
+static ssize_t encrypt (struct file * fs, const char __user * buf, size_t hsize, loff_t * off) {
+    struct encds * ds;
+    ds = (struct encds *) fs->private_data;
+
+    int err = copy_from_user(kernel_buffer, buf, hsize);
+    if (err != 0) {
+        printk(KERN_ERR "encrypt: copy_from_user failed: %d bytes failed to copy\n", err);
+        return -1;
+    }
+
+    for (int i = 0; i < hsize; i++) {
+        kernel_buffer[i] = (kernel_buffer[i] + ds->key) % 256;
+    }
+
     return hsize;
 }
 
-static ssize_t myRead (struct file * fs, char __user * buf, size_t hsize, loff_t * off) {
-    struct myds * ds;
-    ds = (struct myds *) fs->private_data;
-    ds->count = ds->count + 1;
-    printk(KERN_INFO "We read : %lu on write number %d\n", hsize, ds->count);
-    return 0;
+static ssize_t decrypt (struct file * fs, char __user * buf, size_t hsize, loff_t * off) {
+    struct encds * ds;
+    ds = (struct encds *) fs->private_data;
+    
+    int err = copy_to_user(buf, kernel_buffer, hsize);
+    if (err != 0) {
+        printk(KERN_ERR "decrypt: copy_to_user failed: %d bytes failed to copy\n", err);
+        return -1;
+    }
+
+    for (int i = 0; i < hsize; i++) {
+        buf[i] = (buf[i] - ds->key) % 256;
+    }
+
+    return hsize;
 }
 
 static int myOpen(struct inode * inode, struct file * fs) {
-    struct myds * ds;
-    ds = vmalloc(sizeof(struct myds));
+    struct encds * ds;
+    ds = vmalloc(sizeof(struct encds));
 
-    if (ds == 0) {
+    if (encds == 0) {
         printk(KERN_ERR "Cannot vmalloc, File not opened.\n");
         return -1;
     }
 
-    ds->count = 0;
+    encds->key = 0;
     fs->private_data = ds;
     return 0;
 }
 
 static int myClose(struct inode * inode, struct file * fs) {
-    struct myds * ds;
-    ds = (struct myds *) fs->private_data;
+    struct encds * ds;
+    ds = (struct encds *) fs->private_data;
     vfree(ds);
     return 0;
 }
+
+
 
 // this is a way to deal with device files where there may not be read/write
 // basically counts how many times "write" was called
 static long myIoCtl (struct file * fs, unsigned int command, unsigned long data) {
     int * count;
-    struct myds * ds;
-    ds = (struct myds *) fs->private_data;
+    struct encds * ds;
+    ds = (struct encds *) fs->private_data;
     if (command != 3) {
         printk(KERN_ERR "failed in myioctl.\n");
         return -1;
@@ -89,16 +120,6 @@ static long myIoCtl (struct file * fs, unsigned int command, unsigned long data)
     count = (int *) data;
     *count = ds->count;
     return 0;
-}
-
-// another data structure
-struct file_operations fops = {
-    .open = myOpen,
-    .release = myClose,
-    .write = myWrite,
-    .read = myRead,
-    .unlocked_ioctl = myIoCtl,
-    .owner = THIS_MODULE,
 }
 
 // creates a device node in /dev, returns error if not made
@@ -112,4 +133,11 @@ int init_module(void) {
     printk(KERN_INFO "Register chardev succeeded 1: %d\n", registers);
     cdev_init(&my_cdev, &fops);
 
+    kernel_buffer = vmalloc(BUFFER_SIZE);
+    if (kernel_buffer == NULL) {
+        printk(KERN_ERR "Failed to vmalloc kernel_buffer.\n");
+        return -1;
+    }
+
+    return 0;
 }
