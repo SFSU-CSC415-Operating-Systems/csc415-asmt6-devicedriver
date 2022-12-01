@@ -54,6 +54,7 @@ struct file_operations fops = {
 // data structure used for keeping count of how may times data is written
 typedef struct encds {
     int key;
+    char flag[1];  // 'e' is encrypted, 'd' is decrypted
 } encds;
 
 // this write function increments the data structure's count every time it is called.
@@ -67,12 +68,23 @@ static ssize_t myWrite (struct file * fs, const char __user * buf, size_t hsize,
 
     err = copy_from_user(kernel_buffer, buf, hsize);
 
-    printk(KERN_INFO "myWrite: copy_from_user\n%s\n", buf);
-
     if (err != 0) {
         printk(KERN_ERR "encrypt: copy_from_user failed: %d bytes failed to copy\n", err);
         return -1;
     }
+
+    printk(KERN_INFO "myWrite: copy_from_user\n%s\n", buf);
+
+    char *temp = vmalloc(strlen(kernel_buffer) + 1);
+
+    if (encrypt(temp, kernel_buffer, ds->key) < 0) {
+        return -1;
+    }
+
+    strcpy(kernel_buffer, temp);
+
+    vfree(temp);
+    temp = NULL;
 
     return hsize;
 }
