@@ -31,11 +31,21 @@ static long myIoCtl (struct file * fs, unsigned int command, unsigned long data)
 
 char *kernel_buffer;
 
-// struct cdev my_cdev;
+struct cdev my_cdev;
 
 MODULE_AUTHOR("Mark Kim");
 MODULE_DESCRIPTION("A simple encryption/decryption program");
 MODULE_LICENSE("GPL");
+
+// another data structure
+struct file_operations fops = {
+    .open = myOpen,
+    .release = myClose,
+    .write = myEncrypt,
+    .read = myDecrypt,
+    .unlocked_ioctl = myIoCtl,
+    .owner = THIS_MODULE
+};
 
 // data structure used for keeping count of how may times data is written
 typedef struct encds {
@@ -118,16 +128,6 @@ static long myIoCtl (struct file * fs, unsigned int command, unsigned long data)
     // count = (int *) data;
     // *count = ds->count;
     return 0;
-}
-
-// another data structure
-struct file_operations fops = {
-    .open = myOpen,
-    .release = myClose,
-    .write = myEncrypt,
-    .read = myDecrypt,
-    .unlocked_ioctl = myIoCtl,
-    .owner = THIS_MODULE,
 }
 
 // creates a device node in /dev, returns error if not made
