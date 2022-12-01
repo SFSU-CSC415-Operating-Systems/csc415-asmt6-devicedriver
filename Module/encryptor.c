@@ -172,11 +172,9 @@ void cleanup_module(void) {
     // unregister_chrdev_region(devno, 1);
     // cdev_del(&my_cdev);
 
-    int result;
+    unregister_chrdev(MY_MAJOR, DEVICE_NAME);
 
-    result = unregister_chrdev(MY_MAJOR, DEVICE_NAME, &fops);
-
-    kfree(kernel_buffer);
+    vfree(kernel_buffer);
 
     printk(KERN_INFO "Goodbye from encryptor driver.\n");
 }
