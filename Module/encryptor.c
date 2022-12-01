@@ -23,9 +23,15 @@
 #define DEVICE_NAME "encryptor"
 #define BUFFER_SIZE 512
 
+static ssize_t myDecrypt(struct file * fs, char __user * buf, size_t hsize, loff_t * off);
+static ssize_t myEncrypt(struct file * fs, const char __user * buf, size_t hsize, loff_t * off);
+static int myOpen(struct inode * inode, struct file * fs);
+static int myClose(struct inode * inode, struct file * fs);
+static long myIoCtl (struct file * fs, unsigned int command, unsigned long data);
+
 char *kernel_buffer;
 
-struct cdev my_cdev;
+// struct cdev my_cdev;
 
 MODULE_AUTHOR("Mark Kim");
 MODULE_DESCRIPTION("A simple encryption/decryption program");
@@ -36,48 +42,42 @@ typedef struct encds {
     int key;
 } encds;
 
-// another data structure
-struct file_operations fops = {
-    .open = myOpen,
-    .release = myClose,
-    .write = encrypt,
-    .read = decrypt,
-    .unlocked_ioctl = myIoCtl,
-    .owner = THIS_MODULE,
-}
-
 // this write function increments the data structure's count every time it is called.
 // NOTE - data is not physically written anywhere.
 // returns how many bytes were passed in.
 // 0 is in, 1 is out, 2 is error, 3 is the first file handle
-static ssize_t encrypt (struct file * fs, const char __user * buf, size_t hsize, loff_t * off) {
+static ssize_t myEncrypt (struct file * fs, const char __user * buf, size_t hsize, loff_t * off) {
+    int err, i;
     struct encds * ds;
     ds = (struct encds *) fs->private_data;
 
-    int err = copy_from_user(kernel_buffer, buf, hsize);
+    err = copy_from_user(kernel_buffer, buf, hsize);
+
     if (err != 0) {
         printk(KERN_ERR "encrypt: copy_from_user failed: %d bytes failed to copy\n", err);
         return -1;
     }
 
-    for (int i = 0; i < hsize; i++) {
+    for (i = 0; i < hsize; i++) {
         kernel_buffer[i] = (kernel_buffer[i] + ds->key) % 256;
     }
 
     return hsize;
 }
 
-static ssize_t decrypt (struct file * fs, char __user * buf, size_t hsize, loff_t * off) {
+static ssize_t myDecrypt (struct file * fs, char __user * buf, size_t hsize, loff_t * off) {
+    int err, i;
     struct encds * ds;
     ds = (struct encds *) fs->private_data;
     
-    int err = copy_to_user(buf, kernel_buffer, hsize);
+    err = copy_to_user(buf, kernel_buffer, hsize);
+    
     if (err != 0) {
         printk(KERN_ERR "decrypt: copy_to_user failed: %d bytes failed to copy\n", err);
         return -1;
     }
 
-    for (int i = 0; i < hsize; i++) {
+    for (i = 0; i < hsize; i++) {
         buf[i] = (buf[i] - ds->key) % 256;
     }
 
@@ -88,12 +88,12 @@ static int myOpen(struct inode * inode, struct file * fs) {
     struct encds * ds;
     ds = vmalloc(sizeof(struct encds));
 
-    if (encds == 0) {
+    if (ds == 0) {
         printk(KERN_ERR "Cannot vmalloc, File not opened.\n");
         return -1;
     }
 
-    encds->key = 0;
+    ds->key = 0;
     fs->private_data = ds;
     return 0;
 }
@@ -105,26 +105,34 @@ static int myClose(struct inode * inode, struct file * fs) {
     return 0;
 }
 
-
-
 // this is a way to deal with device files where there may not be read/write
 // basically counts how many times "write" was called
 static long myIoCtl (struct file * fs, unsigned int command, unsigned long data) {
-    int * count;
+    // int * count;
     struct encds * ds;
     ds = (struct encds *) fs->private_data;
     if (command != 3) {
         printk(KERN_ERR "failed in myioctl.\n");
         return -1;
     }
-    count = (int *) data;
-    *count = ds->count;
+    // count = (int *) data;
+    // *count = ds->count;
     return 0;
+}
+
+// another data structure
+struct file_operations fops = {
+    .open = myOpen,
+    .release = myClose,
+    .write = myEncrypt,
+    .read = myDecrypt,
+    .unlocked_ioctl = myIoCtl,
+    .owner = THIS_MODULE,
 }
 
 // creates a device node in /dev, returns error if not made
 int init_module(void) {
-    int result, registers;
+    int registers;
     dev_t devno;
 
     devno = MKDEV(MY_MAJOR, MY_MINOR);
