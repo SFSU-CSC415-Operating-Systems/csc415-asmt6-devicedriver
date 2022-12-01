@@ -132,14 +132,30 @@ static long myIoCtl (struct file * fs, unsigned int command, unsigned long data)
 
 // creates a device node in /dev, returns error if not made
 int init_module(void) {
-    int registers, result;
-    dev_t devno;
+    // int registers, result;
+    // dev_t devno;
 
-    devno = MKDEV(MY_MAJOR, MY_MINOR);
+    // devno = MKDEV(MY_MAJOR, MY_MINOR);
 
-    registers = register_chrdev_region(devno, 1, DEVICE_NAME);
-    printk(KERN_INFO "Register chardev succeeded 1: %d\n", registers);
-    cdev_init(&my_cdev, &fops);
+    // registers = register_chrdev_region(devno, 1, DEVICE_NAME);
+    // printk(KERN_INFO "Register chardev succeeded 1: %d\n", registers);
+    // cdev_init(&my_cdev, &fops);
+
+    // kernel_buffer = vmalloc(BUFFER_SIZE);
+    // if (kernel_buffer == NULL) {
+    //     printk(KERN_ERR "Failed to vmalloc kernel_buffer.\n");
+    //     return -1;
+    // }
+
+    // result = cdev_add(&my_cdev, devno, 1);
+
+    int result;
+
+    result = register_chrdev(MY_MAJOR, DEVICE_NAME, &fops);
+
+    if (result < 0) {
+        return result;
+    }
 
     kernel_buffer = vmalloc(BUFFER_SIZE);
     if (kernel_buffer == NULL) {
@@ -147,16 +163,20 @@ int init_module(void) {
         return -1;
     }
 
-    result = cdev_add(&my_cdev, devno, 1);
-
     return result;
 }
 
 void cleanup_module(void) {
-    dev_t devno;
-    devno = MKDEV(MY_MAJOR, MY_MINOR);
-    unregister_chrdev_region(devno, 1);
-    cdev_del(&my_cdev);
+    // dev_t devno;
+    // devno = MKDEV(MY_MAJOR, MY_MINOR);
+    // unregister_chrdev_region(devno, 1);
+    // cdev_del(&my_cdev);
+
+    int result;
+
+    result = unregister_chrdev(MY_MAJOR, DEVICE_NAME, &fops);
+
+    kfree(kernel_buffer);
 
     printk(KERN_INFO "Goodbye from encryptor driver.\n");
 }
