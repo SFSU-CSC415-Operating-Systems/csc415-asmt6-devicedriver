@@ -152,9 +152,9 @@ int init_module(void) {
     return result;
 }
 
-int cleanup_module(void) {
+void cleanup_module(void) {
     dev_t devno;
-    devno = MVDEV(MY_MAJOR, MY_MINOR);
+    devno = MKDEV(MY_MAJOR, MY_MINOR);
     unregister_chrdev_region(devno, 1);
     cdev_del(&my_cdev);
 
