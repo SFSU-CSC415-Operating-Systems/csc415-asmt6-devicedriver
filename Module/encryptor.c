@@ -18,16 +18,20 @@
 #include <linux/vmalloc.h>
 #include <linux/sched.h>
 
+#define ENCRYPT _IO('e', 0)
+#define DECRYPT _IO('e', 1)
 #define MY_MAJOR 415
 #define MY_MINOR 0
 #define DEVICE_NAME "encryptor"
 #define BUFFER_SIZE 512
 
-static ssize_t myDecrypt(struct file * fs, char __user * buf, size_t hsize, loff_t * off);
-static ssize_t myEncrypt(struct file * fs, const char __user * buf, size_t hsize, loff_t * off);
+static ssize_t myRead(struct file * fs, char __user * buf, size_t hsize, loff_t * off);
+static ssize_t myWrite(struct file * fs, const char __user * buf, size_t hsize, loff_t * off);
 static int myOpen(struct inode * inode, struct file * fs);
 static int myClose(struct inode * inode, struct file * fs);
 static long myIoCtl (struct file * fs, unsigned int command, unsigned long data);
+int encrypt(char *dest, const char *src, const int key);
+int decrypt(char *dest, const char *src, const int key);
 
 char *kernel_buffer;
 
@@ -41,8 +45,8 @@ MODULE_LICENSE("GPL");
 struct file_operations fops = {
     .open = myOpen,
     .release = myClose,
-    .write = myEncrypt,
-    .read = myDecrypt,
+    .write = myWrite,
+    .read = myRead,
     .unlocked_ioctl = myIoCtl,
     .owner = THIS_MODULE
 };
@@ -56,39 +60,35 @@ typedef struct encds {
 // NOTE - data is not physically written anywhere.
 // returns how many bytes were passed in.
 // 0 is in, 1 is out, 2 is error, 3 is the first file handle
-static ssize_t myEncrypt (struct file * fs, const char __user * buf, size_t hsize, loff_t * off) {
+static ssize_t myWrite (struct file * fs, const char __user * buf, size_t hsize, loff_t * off) {
     int err, i;
     struct encds * ds;
     ds = (struct encds *) fs->private_data;
 
     err = copy_from_user(kernel_buffer, buf, hsize);
 
+    printk(KERN_INFO "myWrite: copy_from_user\n%s\n", buf);
+
     if (err != 0) {
         printk(KERN_ERR "encrypt: copy_from_user failed: %d bytes failed to copy\n", err);
         return -1;
     }
 
-    for (i = 0; i < hsize; i++) {
-        kernel_buffer[i] = (kernel_buffer[i] + ds->key) % 256;
-    }
-
     return hsize;
 }
 
-static ssize_t myDecrypt (struct file * fs, char __user * buf, size_t hsize, loff_t * off) {
+static ssize_t myRead (struct file * fs, char __user * buf, size_t hsize, loff_t * off) {
     int err, i;
     struct encds * ds;
     ds = (struct encds *) fs->private_data;
     
     err = copy_to_user(buf, kernel_buffer, hsize);
+
+    printk(KERN_INFO "myRead: copy_to_user\n%s\n", kernel_buffer);
     
     if (err != 0) {
         printk(KERN_ERR "decrypt: copy_to_user failed: %d bytes failed to copy\n", err);
         return -1;
-    }
-
-    for (i = 0; i < hsize; i++) {
-        buf[i] = (buf[i] - ds->key) % 256;
     }
 
     return hsize;
@@ -115,66 +115,109 @@ static int myClose(struct inode * inode, struct file * fs) {
     return 0;
 }
 
+int encrypt(char *dest, const char *src, const int key) {
+    int i;
+
+    if (src == NULL || dest == NULL) {
+        printk(KERN_ERR "encrypt: encryption failed: source or destination NULL\n");
+        return -1;
+    }
+
+    int src_len = strlen(src);
+    
+    if (src_len < 1) {
+        printk(KERN_ERR "encrypt: encryption failed: source length invalid (< 1)\n");
+        return -1;
+    }
+
+    for (i = 0; i < src_len; i++) {
+        dest[i] = (src[i] + key) % 128;
+    }
+
+    return src_len;
+}
+
+int decrypt(char *dest, const char *src, const int key) {
+    int i;
+
+    if (src == NULL || dest == NULL) {
+        printk(KERN_ERR "decrypt: decryption failed: source or destination NULL\n");
+        return -1;
+    }
+
+    int src_len = strlen(src);
+    
+    if (src_len < 1) {
+        printk(KERN_ERR "decrypt: decryption failed: source length invalid (< 1)\n");
+        return -1;
+    }
+
+    for (i = 0; i < src_len; i++) {
+        dest[i] = (src[i] - key) % 128;
+    }
+
+    return src_len;
+}
+
 // this is a way to deal with device files where there may not be read/write
 // basically counts how many times "write" was called
 static long myIoCtl (struct file * fs, unsigned int command, unsigned long data) {
-    // int * count;
     struct encds * ds;
     ds = (struct encds *) fs->private_data;
-    if (command != 3) {
-        printk(KERN_ERR "failed in myioctl.\n");
-        return -1;
+
+    char *temp = vmalloc(strlen(kernel_buffer) + 1);
+
+    switch (command) {
+        case ENCRYPT:
+            printk(KERN_INFO "Encrypting...\n");
+            encrypt(temp, kernel_buffer, ds->key);
+            break;
+        case DECRYPT:
+            printk(KERN_INFO "Decrypting...\n");
+            decrypt(temp, kernel_buffer, ds->key);
+            break;
+        default:
+            printk(KERN_ERR "myIoCtl: invalid command %d\n", command);
     }
-    // count = (int *) data;
-    // *count = ds->count;
+
+    strcpy(kernel_buffer, temp);
+
+    vfree(temp);
+    temp = NULL;
+
     return 0;
 }
 
 // creates a device node in /dev, returns error if not made
 int init_module(void) {
-    // int registers, result;
-    // dev_t devno;
+    int result, registers;
+    dev_t devno;
 
-    // devno = MKDEV(MY_MAJOR, MY_MINOR);
+    devno = MKDEV(MY_MAJOR, MY_MINOR);
 
-    // registers = register_chrdev_region(devno, 1, DEVICE_NAME);
-    // printk(KERN_INFO "Register chardev succeeded 1: %d\n", registers);
-    // cdev_init(&my_cdev, &fops);
+    registers = register_chrdev_region(devno, 1, DEVICE_NAME);
+    printk(KERN_INFO "Register chardev succeeded 1: %d\n", registers);
+    cdev_init(&my_cdev, &fops);
 
-    // kernel_buffer = vmalloc(BUFFER_SIZE);
-    // if (kernel_buffer == NULL) {
-    //     printk(KERN_ERR "Failed to vmalloc kernel_buffer.\n");
-    //     return -1;
-    // }
-
-    // result = cdev_add(&my_cdev, devno, 1);
-
-    int result;
-
-    result = register_chrdev(MY_MAJOR, DEVICE_NAME, &fops);
+    result = cdev_add(&my_cdev, devno, 1);
 
     if (result < 0) {
-        return result;
-    }
-
-    kernel_buffer = vmalloc(BUFFER_SIZE);
-    if (kernel_buffer == NULL) {
-        printk(KERN_ERR "Failed to vmalloc kernel_buffer.\n");
-        return -1;
+        printk(KERN_ERR "init_module: add char device failed\n");
     }
 
     return result;
 }
 
 void cleanup_module(void) {
-    // dev_t devno;
-    // devno = MKDEV(MY_MAJOR, MY_MINOR);
-    // unregister_chrdev_region(devno, 1);
-    // cdev_del(&my_cdev);
+    dev_t devno;
+    devno = MKDEV(MY_MAJOR, MY_MINOR);
+    unregister_chrdev_region(devno, 1);
+    cdev_del(&my_cdev);
 
-    unregister_chrdev(MY_MAJOR, DEVICE_NAME);
+    // unregister_chrdev(MY_MAJOR, DEVICE_NAME);
 
     vfree(kernel_buffer);
+    kernel_buffer = NULL;
 
     printk(KERN_INFO "Goodbye from encryptor driver.\n");
 }
