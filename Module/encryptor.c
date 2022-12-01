@@ -132,7 +132,7 @@ static long myIoCtl (struct file * fs, unsigned int command, unsigned long data)
 
 // creates a device node in /dev, returns error if not made
 int init_module(void) {
-    int registers;
+    int registers, result;
     dev_t devno;
 
     devno = MKDEV(MY_MAJOR, MY_MINOR);
@@ -147,5 +147,16 @@ int init_module(void) {
         return -1;
     }
 
-    return 0;
+    result = cdev_add(&my_cdev, devno, 1);
+
+    return result;
+}
+
+int cleanup_module(void) {
+    dev_t devno;
+    devno = MVDEV(MY_MAJOR, MY_MINOR);
+    unregister_chrdev_region(devno, 1);
+    cdev_del(&my_cdev);
+
+    printk(KERN_INFO "Goodbye from encryptor driver.\n");
 }
