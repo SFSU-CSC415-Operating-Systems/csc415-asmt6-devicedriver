@@ -24,7 +24,7 @@
 #define MY_MINOR 0
 #define DEVICE_NAME "encryptor"
 #define BUFFER_SIZE 512
-#define KEY 0
+#define KEY 5
 
 static ssize_t myRead(struct file * fs, char __user * buf, size_t hsize, loff_t * off);
 static ssize_t myWrite(struct file * fs, const char __user * buf, size_t hsize, loff_t * off);
@@ -63,67 +63,71 @@ typedef struct encds {
 // this write function increments the data structure's count every time it is called.
 // NOTE - data is not physically written anywhere.
 // returns how many bytes were passed in.
-// 0 is in, 1 is out, 2 is error, 3 is the first file handle
 static ssize_t myWrite (struct file * fs, const char __user * buf, size_t hsize, loff_t * off) {
-    int err;
-    // char *temp;
+    int err, i, bufLen;
     struct encds * ds;
+
+    printk(KERN_INFO "inside myWrite");
+
     ds = (struct encds *) fs->private_data;
 
-    err = copy_from_user(kbuf, buf, hsize);
+    err = copy_from_user(kernel_buffer + *off, buf, hsize);
+    *off += hsize;
 
     if (err != 0) {
         printk(KERN_ERR "myWrite: copy_from_user failed: %d bytes failed to copy\n", err);
         return -1;
     }
 
-    printk(KERN_INFO "myWrite: copy_from_user\n%s\n", buf);
+    bufLen = strlen(kernel_buffer);
 
-    // temp = vmalloc(strlen(buf) + 1);
+    printk(KERN_INFO "Before Encrypt\nKernel Buffer Length: %d:\n%s\n", bufLen, kernel_buffer);
 
-    if (encrypt(encData, kbuf, ds->key) < 0) {
-        return -1;
+    for (i = 0; i < bufLen - 1; i++) {
+        kernel_buffer[i] = (kernel_buffer[i] + ds->key) % 128;
     }
 
-    // strcpy(kbuf, temp);
-
-    // vfree(temp);
-    // temp = NULL;
+    printk(KERN_INFO "After Encrypt:\n%s\n", kernel_buffer);
 
     return hsize;
 }
 
 static ssize_t myRead (struct file * fs, char __user * buf, size_t hsize, loff_t * off) {
-    int err;
-    // char *temp;
+    int err, i, bufLen;
     struct encds * ds;
+
+    printk(KERN_INFO "inside myRead");
+
     ds = (struct encds *) fs->private_data;
 
-    // temp = vmalloc(strlen(kbuf) + 1);
+    bufLen = strlen(kernel_buffer);
 
-    if (decrypt(kbuf, encData, ds->key) < 0) {
-        return -1;
+    printk(KERN_INFO "Before Decrypt\nKernel Buffer Length: %d\n%s\n", bufLen, kernel_buffer);
+
+    for (i = 0; i < bufLen - 1; i++) {
+        kernel_buffer[i] = (kernel_buffer[i] - ds->key) % 128;
     }
-    
-    err = copy_to_user(buf, kbuf, hsize);
 
-    printk(KERN_INFO "myRead: copy_to_user\n%s\n", kbuf);
+    printk(KERN_INFO "After Decrypt:\n%s\n", kernel_buffer);
+    
+    err = copy_to_user(buf, kernel_buffer + *off, bufLen);
+    *off += bufLen;
     
     if (err != 0) {
         printk(KERN_ERR "myRead: copy_to_user failed: %d bytes failed to copy\n", err);
         return -1;
     }
 
-    // strcpy(kbuf, temp);
+    printk(KERN_INFO "Decrypt End");
 
-    // vfree(temp);
-    // temp = NULL;
-
-    return hsize;
+    return bufLen;
 }
 
 static int myOpen(struct inode * inode, struct file * fs) {
     struct encds * ds;
+
+    printk(KERN_INFO "inside myOpen");
+
     ds = vmalloc(sizeof(struct encds));
 
     if (ds == 0) {
@@ -138,6 +142,9 @@ static int myOpen(struct inode * inode, struct file * fs) {
 
 static int myClose(struct inode * inode, struct file * fs) {
     struct encds * ds;
+
+    printk(KERN_INFO "inside myClose");
+
     ds = (struct encds *) fs->private_data;
     vfree(ds);
     return 0;
@@ -195,22 +202,13 @@ int decrypt(char *dest, const char *src, const int key) {
 // basically counts how many times "write" was called
 static long myIoCtl (struct file * fs, unsigned int command, unsigned long data) {
     struct encds * ds;
-    char *temp;
+
+    printk(KERN_INFO "inside myIoCtl");
+
     ds = (struct encds *) fs->private_data;
-
-    temp = vmalloc(strlen(kbuf) + 1);
-
-    switch (command) {
-        case ENCRYPT:
-            printk(KERN_INFO "Encrypting...\n");
-            encrypt(encData, kbuf, ds->key);
-            break;
-        case DECRYPT:
-            printk(KERN_INFO "Decrypting...\n");
-            decrypt(kbuf, encData, ds->key);
-            break;
-        default:
-            printk(KERN_ERR "myIoCtl: invalid command %d\n", command);
+    if (command < 0) {
+        printk(KERN_ERR "failed in myioctl.\n");
+        return -1;
     }
 
     strcpy(kbuf, temp);
@@ -226,6 +224,8 @@ int init_module(void) {
     int result, registers;
     dev_t devno;
 
+    printk(KERN_INFO "inside init_module");
+
     devno = MKDEV(MY_MAJOR, MY_MINOR);
 
     registers = register_chrdev_region(devno, 1, DEVICE_NAME);
@@ -234,15 +234,16 @@ int init_module(void) {
 
     result = cdev_add(&my_cdev, devno, 1);
 
-    if (result < 0) {
-        printk(KERN_ERR "init_module: add char device failed\n");
-    }
+    printk(KERN_INFO "after cdev_add");
 
     return result;
 }
 
 void cleanup_module(void) {
     dev_t devno;
+
+    printk(KERN_INFO "inside cleanup_module");
+
     devno = MKDEV(MY_MAJOR, MY_MINOR);
     unregister_chrdev_region(devno, 1);
     cdev_del(&my_cdev);
