@@ -7,7 +7,8 @@
 *
 * File: encryptor.c
 *
-* Description:
+* Description: This is an encryption character device driver.  It takes
+* character input and will apply a caesar cipher to it.
 *
 **************************************************************/
 
@@ -73,7 +74,8 @@ static ssize_t myWrite (struct file * fs, const char __user * buf, size_t hsize,
     ds = (struct encds *) fs->private_data;
 
     err = copy_from_user(kernel_buffer + *off, buf, hsize);
-    *off += hsize;
+
+    printk(KERN_SOH "WRITE: Offset: %lld", *off);
 
     if (err != 0) {
         printk(KERN_ERR "encrypt: copy_from_user failed: %d bytes failed to copy\n", err);
@@ -99,23 +101,24 @@ static ssize_t myRead (struct file * fs, char __user * buf, size_t hsize, loff_t
 
     bufLen = strlen(kernel_buffer);
 
+    printk(KERN_SOH "READ: Buffer Length: %d    Offset: %lld", bufLen, *off);
+
     if (bufLen < hsize) {
         hsize = bufLen;
     }
 
-    decrypt(ds->key);
+    // decrypt(ds->key);
 
-    ds->flag = 0;
+    // ds->flag = 0;
     
     err = copy_to_user(buf, kernel_buffer + *off, hsize);
-    *off += hsize;
     
     if (err != 0) {
         printk(KERN_ERR "decrypt: copy_to_user failed: %d bytes failed to copy\n", err);
         return -1;
     }
 
-    return hsize;
+    return 0;
 }
 
 // this open function initialized the encds data structure and saves it in the
@@ -152,8 +155,10 @@ static int encrypt(int key) {
     bufLen = strlen(kernel_buffer);
 
     for (i = 0; i < bufLen - 1; i++) {
-        kernel_buffer[i] = (kernel_buffer[i] + key) % 128;
+        kernel_buffer[i] = ((kernel_buffer[i] - key) % 128) + 1;
     }
+
+    printk(KERN_INFO "Encrypted Text:\n%s\n", kernel_buffer);
 
     return 0;
 }
@@ -165,8 +170,10 @@ static int decrypt(int key) {
     bufLen = strlen(kernel_buffer);
 
     for (i = 0; i < bufLen - 1; i++) {
-        kernel_buffer[i] = (kernel_buffer[i] - key) % 128;
+        kernel_buffer[i] = (kernel_buffer[i] + key - 1) % 128;
     }
+
+    printk(KERN_INFO "Decrypted Text:\n%s\n", kernel_buffer);
 
     return 0;
 }
