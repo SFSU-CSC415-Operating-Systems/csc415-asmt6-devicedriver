@@ -34,7 +34,9 @@ static long myIoCtl (struct file * fs, unsigned int command, unsigned long data)
 int encrypt(char *dest, const char *src, const int key);
 int decrypt(char *dest, const char *src, const int key);
 
-char *kernel_buffer;
+char kbuf[BUFFER_SIZE];
+char encData[BUFFER_SIZE];
+int key = KEY;
 
 struct cdev my_cdev;
 
@@ -64,11 +66,11 @@ typedef struct encds {
 // 0 is in, 1 is out, 2 is error, 3 is the first file handle
 static ssize_t myWrite (struct file * fs, const char __user * buf, size_t hsize, loff_t * off) {
     int err;
-    char *temp;
+    // char *temp;
     struct encds * ds;
     ds = (struct encds *) fs->private_data;
 
-    err = copy_from_user(kernel_buffer, buf, hsize);
+    err = copy_from_user(kbuf, buf, hsize);
 
     if (err != 0) {
         printk(KERN_ERR "myWrite: copy_from_user failed: %d bytes failed to copy\n", err);
@@ -77,45 +79,45 @@ static ssize_t myWrite (struct file * fs, const char __user * buf, size_t hsize,
 
     printk(KERN_INFO "myWrite: copy_from_user\n%s\n", buf);
 
-    temp = vmalloc(strlen(kernel_buffer) + 1);
+    // temp = vmalloc(strlen(buf) + 1);
 
-    if (encrypt(temp, kernel_buffer, ds->key) < 0) {
+    if (encrypt(encData, kbuf, ds->key) < 0) {
         return -1;
     }
 
-    strcpy(kernel_buffer, temp);
+    // strcpy(kbuf, temp);
 
-    vfree(temp);
-    temp = NULL;
+    // vfree(temp);
+    // temp = NULL;
 
     return hsize;
 }
 
 static ssize_t myRead (struct file * fs, char __user * buf, size_t hsize, loff_t * off) {
     int err;
-    char *temp;
+    // char *temp;
     struct encds * ds;
     ds = (struct encds *) fs->private_data;
-    
-    err = copy_to_user(buf, kernel_buffer, hsize);
 
-    printk(KERN_INFO "myRead: copy_to_user\n%s\n", kernel_buffer);
+    // temp = vmalloc(strlen(kbuf) + 1);
+
+    if (decrypt(kbuf, encData, ds->key) < 0) {
+        return -1;
+    }
+    
+    err = copy_to_user(buf, kbuf, hsize);
+
+    printk(KERN_INFO "myRead: copy_to_user\n%s\n", kbuf);
     
     if (err != 0) {
         printk(KERN_ERR "myRead: copy_to_user failed: %d bytes failed to copy\n", err);
         return -1;
     }
 
-    temp = vmalloc(strlen(kernel_buffer) + 1);
+    // strcpy(kbuf, temp);
 
-    if (decrypt(temp, kernel_buffer, ds->key) < 0) {
-        return -1;
-    }
-
-    strcpy(kernel_buffer, temp);
-
-    vfree(temp);
-    temp = NULL;
+    // vfree(temp);
+    // temp = NULL;
 
     return hsize;
 }
@@ -160,6 +162,8 @@ int encrypt(char *dest, const char *src, const int key) {
         dest[i] = (src[i] + key) % 128;
     }
 
+    printk(KERN_INFO "Encrypted String:\n%s\n", dest);
+
     return src_len;
 }
 
@@ -182,6 +186,8 @@ int decrypt(char *dest, const char *src, const int key) {
         dest[i] = (src[i] - key) % 128;
     }
 
+    printk(KERN_INFO "Decrypted String:\n%s\n", dest);
+
     return src_len;
 }
 
@@ -192,22 +198,22 @@ static long myIoCtl (struct file * fs, unsigned int command, unsigned long data)
     char *temp;
     ds = (struct encds *) fs->private_data;
 
-    temp = vmalloc(strlen(kernel_buffer) + 1);
+    temp = vmalloc(strlen(kbuf) + 1);
 
     switch (command) {
         case ENCRYPT:
             printk(KERN_INFO "Encrypting...\n");
-            encrypt(temp, kernel_buffer, ds->key);
+            encrypt(encData, kbuf, ds->key);
             break;
         case DECRYPT:
             printk(KERN_INFO "Decrypting...\n");
-            decrypt(temp, kernel_buffer, ds->key);
+            decrypt(kbuf, encData, ds->key);
             break;
         default:
             printk(KERN_ERR "myIoCtl: invalid command %d\n", command);
     }
 
-    strcpy(kernel_buffer, temp);
+    strcpy(kbuf, temp);
 
     vfree(temp);
     temp = NULL;
@@ -243,8 +249,8 @@ void cleanup_module(void) {
 
     // unregister_chrdev(MY_MAJOR, DEVICE_NAME);
 
-    vfree(kernel_buffer);
-    kernel_buffer = NULL;
+    // vfree(kbuf);
+    // kbuf = NULL;
 
     printk(KERN_INFO "Goodbye from encryptor driver.\n");
 }
