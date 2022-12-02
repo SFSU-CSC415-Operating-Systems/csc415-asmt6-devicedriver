@@ -22,7 +22,7 @@
 #define MY_MINOR 0
 #define DEVICE_NAME "encryptor"
 #define BUFFER_SIZE 512
-#define KEY 5
+#define KEY 5  // default key
 
 #define ENCRYPT _IO('e', 0)
 #define DECRYPT _IO('e', 1)
@@ -44,7 +44,7 @@ MODULE_AUTHOR("Mark Kim");
 MODULE_DESCRIPTION("A simple encryption/decryption program");
 MODULE_LICENSE("GPL");
 
-// another data structure
+// file operations data structure
 struct file_operations fops = {
     .open = myOpen,
     .release = myClose,
@@ -54,20 +54,21 @@ struct file_operations fops = {
     .owner = THIS_MODULE
 };
 
-// data structure used for keeping count of how may times data is written
+// data structure used for holding the encryption key and a flag that indicates
+// whether the data is encrypted or decrypted
 typedef struct encds {
     int key;
     int flag; // 0 = unencrypted, 1 = encrypted
 } encds;
 
-// this write function increments the data structure's count every time it is called.
-// NOTE - data is not physically written anywhere.
+// this write function takes in the buffer from user space and brings it into
+// kernel space.  then it encrypts it in the kernel buffer.
 // returns how many bytes were passed in.
 static ssize_t myWrite (struct file * fs, const char __user * buf, size_t hsize, loff_t * off) {
     int err;
     struct encds * ds;
 
-    printk(KERN_INFO "********************* inside myWrite *********************");
+    // printk(KERN_INFO "********************* inside myWrite *********************");
 
     ds = (struct encds *) fs->private_data;
 
@@ -82,16 +83,17 @@ static ssize_t myWrite (struct file * fs, const char __user * buf, size_t hsize,
     encrypt(ds->key);
 
     ds->flag = 1;
-    fs->private_data = ds;
 
     return hsize;
 }
 
+// this read function decrypts the data in the kernel buffer then copies it back
+// to the user space.
 static ssize_t myRead (struct file * fs, char __user * buf, size_t hsize, loff_t * off) {
     int err, bufLen;
     struct encds * ds;
 
-    printk(KERN_INFO "************* inside myRead *************");
+    // printk(KERN_INFO "************* inside myRead *************");
 
     ds = (struct encds *) fs->private_data;
 
@@ -104,7 +106,6 @@ static ssize_t myRead (struct file * fs, char __user * buf, size_t hsize, loff_t
     decrypt(ds->key);
 
     ds->flag = 0;
-    fs->private_data = ds;
     
     err = copy_to_user(buf, kernel_buffer + *off, hsize);
     *off += hsize;
@@ -117,6 +118,8 @@ static ssize_t myRead (struct file * fs, char __user * buf, size_t hsize, loff_t
     return hsize;
 }
 
+// this open function initialized the encds data structure and saves it in the
+// private data of the file system descriptor
 static int myOpen(struct inode * inode, struct file * fs) {
     struct encds * ds;
 
@@ -133,6 +136,7 @@ static int myOpen(struct inode * inode, struct file * fs) {
     return 0;
 }
 
+// this close function frees the file system private data memory
 static int myClose(struct inode * inode, struct file * fs) {
     struct encds * ds;
 
@@ -141,6 +145,7 @@ static int myClose(struct inode * inode, struct file * fs) {
     return 0;
 }
 
+// caesar cypher encryption function
 static int encrypt(int key) {
     int i, bufLen;
 
@@ -153,6 +158,7 @@ static int encrypt(int key) {
     return 0;
 }
 
+// decrypt function
 static int decrypt(int key) {
     int i, bufLen;
 
@@ -165,12 +171,8 @@ static int decrypt(int key) {
     return 0;
 }
 
-static int setkey(int key, struct encds *ds) {
-    ds->key = key;
-}
-
-// this is a way to deal with device files where there may not be read/write
-// basically counts how many times "write" was called
+// this is a way to deal with device files where the data has already been
+// encrypted/decrypted; it also allows for the key to be reset
 static long myIoCtl (struct file * fs, unsigned int command, unsigned long data) {
     struct encds * ds;
 
@@ -187,7 +189,8 @@ static long myIoCtl (struct file * fs, unsigned int command, unsigned long data)
             ds->flag = 0;
             break;
         case SETKEY:
-            
+            ds->key = (int) data;
+            break;
         default:
             printk(KERN_ERR "myIoCtl: invalid command entered");
     }
@@ -216,12 +219,16 @@ int init_module(void) {
     return result;
 }
 
+// removes and destroys module
 void cleanup_module(void) {
     dev_t devno;
 
     devno = MKDEV(MY_MAJOR, MY_MINOR);
     unregister_chrdev_region(devno, 1);
     cdev_del(&my_cdev);
+
+    vfree(kernel_buffer);
+    kernel_buffer = NULL;
 
     printk(KERN_INFO "Goodbye from encryptor driver.\n");
 }
