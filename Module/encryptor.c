@@ -24,6 +24,7 @@
 #define MY_MINOR 0
 #define DEVICE_NAME "encryptor"
 #define BUFFER_SIZE 512
+#define KEY 0
 
 static ssize_t myRead(struct file * fs, char __user * buf, size_t hsize, loff_t * off);
 static ssize_t myWrite(struct file * fs, const char __user * buf, size_t hsize, loff_t * off);
@@ -69,13 +70,14 @@ static ssize_t myWrite (struct file * fs, const char __user * buf, size_t hsize,
     err = copy_from_user(kernel_buffer, buf, hsize);
 
     if (err != 0) {
-        printk(KERN_ERR "encrypt: copy_from_user failed: %d bytes failed to copy\n", err);
+        printk(KERN_ERR "myWrite: copy_from_user failed: %d bytes failed to copy\n", err);
         return -1;
     }
 
     printk(KERN_INFO "myWrite: copy_from_user\n%s\n", buf);
 
-    char *temp = vmalloc(strlen(kernel_buffer) + 1);
+    // char *temp = vmalloc(strlen(kernel_buffer) + 1);
+    char temp[strlen(kernel_buffer)+1];
 
     if (encrypt(temp, kernel_buffer, ds->key) < 0) {
         return -1;
@@ -83,8 +85,8 @@ static ssize_t myWrite (struct file * fs, const char __user * buf, size_t hsize,
 
     strcpy(kernel_buffer, temp);
 
-    vfree(temp);
-    temp = NULL;
+    // vfree(temp);
+    // temp = NULL;
 
     return hsize;
 }
@@ -99,9 +101,20 @@ static ssize_t myRead (struct file * fs, char __user * buf, size_t hsize, loff_t
     printk(KERN_INFO "myRead: copy_to_user\n%s\n", kernel_buffer);
     
     if (err != 0) {
-        printk(KERN_ERR "decrypt: copy_to_user failed: %d bytes failed to copy\n", err);
+        printk(KERN_ERR "myRead: copy_to_user failed: %d bytes failed to copy\n", err);
         return -1;
     }
+
+    char *temp = vmalloc(strlen(kernel_buffer) + 1);
+
+    if (decrypt(temp, kernel_buffer, ds->key) < 0) {
+        return -1;
+    }
+
+    strcpy(kernel_buffer, temp);
+
+    vfree(temp);
+    temp = NULL;
 
     return hsize;
 }
@@ -115,7 +128,7 @@ static int myOpen(struct inode * inode, struct file * fs) {
         return -1;
     }
 
-    ds->key = 0;
+    ds->key = KEY;
     fs->private_data = ds;
     return 0;
 }
