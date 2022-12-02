@@ -63,7 +63,8 @@ typedef struct encds {
 // returns how many bytes were passed in.
 // 0 is in, 1 is out, 2 is error, 3 is the first file handle
 static ssize_t myWrite (struct file * fs, const char __user * buf, size_t hsize, loff_t * off) {
-    int err, i;
+    int err;
+    char *temp;
     struct encds * ds;
     ds = (struct encds *) fs->private_data;
 
@@ -76,8 +77,7 @@ static ssize_t myWrite (struct file * fs, const char __user * buf, size_t hsize,
 
     printk(KERN_INFO "myWrite: copy_from_user\n%s\n", buf);
 
-    // char *temp = vmalloc(strlen(kernel_buffer) + 1);
-    char temp[strlen(kernel_buffer)+1];
+    temp = vmalloc(strlen(kernel_buffer) + 1);
 
     if (encrypt(temp, kernel_buffer, ds->key) < 0) {
         return -1;
@@ -85,14 +85,15 @@ static ssize_t myWrite (struct file * fs, const char __user * buf, size_t hsize,
 
     strcpy(kernel_buffer, temp);
 
-    // vfree(temp);
-    // temp = NULL;
+    vfree(temp);
+    temp = NULL;
 
     return hsize;
 }
 
 static ssize_t myRead (struct file * fs, char __user * buf, size_t hsize, loff_t * off) {
-    int err, i;
+    int err;
+    char *temp;
     struct encds * ds;
     ds = (struct encds *) fs->private_data;
     
@@ -105,7 +106,7 @@ static ssize_t myRead (struct file * fs, char __user * buf, size_t hsize, loff_t
         return -1;
     }
 
-    char *temp = vmalloc(strlen(kernel_buffer) + 1);
+    temp = vmalloc(strlen(kernel_buffer) + 1);
 
     if (decrypt(temp, kernel_buffer, ds->key) < 0) {
         return -1;
@@ -141,14 +142,14 @@ static int myClose(struct inode * inode, struct file * fs) {
 }
 
 int encrypt(char *dest, const char *src, const int key) {
-    int i;
+    int i, src_len;
 
     if (src == NULL || dest == NULL) {
         printk(KERN_ERR "encrypt: encryption failed: source or destination NULL\n");
         return -1;
     }
 
-    int src_len = strlen(src);
+    src_len = strlen(src);
     
     if (src_len < 1) {
         printk(KERN_ERR "encrypt: encryption failed: source length invalid (< 1)\n");
@@ -163,14 +164,14 @@ int encrypt(char *dest, const char *src, const int key) {
 }
 
 int decrypt(char *dest, const char *src, const int key) {
-    int i;
+    int i, src_len;
 
     if (src == NULL || dest == NULL) {
         printk(KERN_ERR "decrypt: decryption failed: source or destination NULL\n");
         return -1;
     }
 
-    int src_len = strlen(src);
+    src_len = strlen(src);
     
     if (src_len < 1) {
         printk(KERN_ERR "decrypt: decryption failed: source length invalid (< 1)\n");
@@ -188,9 +189,10 @@ int decrypt(char *dest, const char *src, const int key) {
 // basically counts how many times "write" was called
 static long myIoCtl (struct file * fs, unsigned int command, unsigned long data) {
     struct encds * ds;
+    char *temp;
     ds = (struct encds *) fs->private_data;
 
-    char *temp = vmalloc(strlen(kernel_buffer) + 1);
+    temp = vmalloc(strlen(kernel_buffer) + 1);
 
     switch (command) {
         case ENCRYPT:
